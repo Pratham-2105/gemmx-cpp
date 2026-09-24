@@ -1,0 +1,17 @@
+
+# Build trees
+build/
+build-*/
+out/
+
+# Editor / tooling
+.vscode/
+.vs/
+.cache/
+compile_commands.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
