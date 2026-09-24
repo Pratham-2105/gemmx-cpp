@@ -1,0 +1,21 @@
+{
+  "run_id": "20260924-212250",
+  "experiment": "exp01_pow2_conflict",
+  "git_commit": "45840da67b48909b5a46a60f38bbf19e58693a8c",
+  "cpu_model": "13th Gen Intel(R) Core(TM) i5-13450HX",
+  "logical_cpus": 16,
+  "os": "linux-wsl 6.6.87.2-microsoft-standard-WSL2",
+  "compiler": "gcc 15.2.0",
+  "build_type": "Release",
+  "cxx_flags": " -O3 -DNDEBUG",
+  "march_native": false,
+  "timer": "std::chrono::steady_clock",
+  "timer_period_ns": 1,
+  "sizes": [496, 500, 504, 508, 511, 512, 513, 516, 520, 528],
+  "reps": 7,
+  "min_sample_ms": 50,
+  "seed": 42,
+  "warmup": "1 untimed call per configuration (also used for calibration and verification)",
+  "verification": "Freivalds check on warm-up output before timing",
+  "allocation_in_timing": false
+}
