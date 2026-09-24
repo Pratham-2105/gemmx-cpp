@@ -1,33 +1,19 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "gemmx/gemm.hpp"
+#include "gemmx/kernels.hpp"
 
+using gemmx::all_kernels;
 using gemmx::Matrix;
 
 namespace {
-
-// ---------------------------------------------------------------------------
-// Kernel registry. Every new kernel gets ONE line here, and then every test
-// in this file runs against it automatically.
-// ---------------------------------------------------------------------------
-template <typename T>
-using KernelFn = void (*)(const Matrix<T> &, const Matrix<T> &, Matrix<T> &);
-
-template <typename T> struct NamedKernel {
-  const char *name;
-  KernelFn<T> fn;
-};
-
-template <typename T> std::vector<NamedKernel<T>> all_kernels() {
-  return {
-      {"reference", &gemmx::gemm_reference<T>},
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Oracle: the same product accumulated in double, plus (|A| |B|)_ij, which is
@@ -63,7 +49,7 @@ void oracle(const Matrix<T> &A, const Matrix<T> &B, std::vector<double> &exact,
 // rounds too) and more for float.
 template <typename T>
 void expect_matches_oracle(const Matrix<T> &A, const Matrix<T> &B,
-                           const Matrix<T> &C, const char *kernel_name) {
+                           const Matrix<T> &C, std::string_view kernel_name) {
   std::vector<double> exact, abs_prod;
   oracle(A, B, exact, abs_prod);
 
