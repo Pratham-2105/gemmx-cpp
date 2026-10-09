@@ -89,3 +89,27 @@ Rothberg & Wolf, 1991).
 - Unexplained: double b96 dips at 1000/2000 (single-call samples; possibly
   noise).
 Next: explicit AVX2/FMA (V3).
+
+---
+
+## EXP04 — Explicit AVX2/FMA (V3) vs compiler vectorization
+
+**Setup check (before running):** runtime CPUID + XGETBV detection reports
+AVX2+FMA available (`cpu_has_avx2_fma() = 1`), so `avx2_b64` is registered
+and covered by the correctness tests (float and double). Disassembly of the
+portable build: `gemm_avx2.cpp.o` contains 17 `vfmadd` instructions,
+`gemm_blocked.cpp.o` contains 0 — the per-function `target("avx2,fma")`
+attribute confines AVX2/FMA to the V3 kernel; the rest of the library stays
+portable.
+
+**Prediction:** `avx2_b64` (blocked BS=64, inner loop as 256-bit FMA:
+4 doubles / 8 floats per instruction) beats the portable `blocked_b64`
+(SSE2: 2 doubles / 4 floats per instruction, separate multiply and add) by
+~1.5–2.5x. Against the native `blocked_b64` it roughly ties (within ~10%),
+because -march=native already auto-vectorizes the same i-k-j inner loop with
+AVX2/FMA; hand-written intrinsics restate what the compiler already emits.
+Both stay well below the core's FMA peak: every FMA also loads and stores a
+vector of C, so the kernel is bound by load/store traffic, not arithmetic.
+This motivates register blocking (V4): keep a tile of C in registers across k.
+
+**Result:** (pending)
