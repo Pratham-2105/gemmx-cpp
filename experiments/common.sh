@@ -25,18 +25,28 @@ if command -v powershell.exe >/dev/null 2>&1; then
   fi
 fi
 
-# Fresh Release build, in its own build dir.
-cmake -S . -B build-exp -DCMAKE_BUILD_TYPE=Release
-cmake --build build-exp -j
+# Two FRESH Release builds of the same code. The build dirs are deleted first,
+# so a stale binary from older code can never be measured by accident.
+#   build-exp/         portable x86-64 (compiler may use SSE2 only)
+#   build-exp-native/  -march=native   (compiler may use AVX2/FMA)
+rm -rf build-exp build-exp-native
 
-# Never measure a build that fails its own correctness tests.
+cmake -S . -B build-exp -DCMAKE_BUILD_TYPE=Release -DGEMMX_NATIVE=OFF
+cmake --build build-exp -j
 ctest --test-dir build-exp --output-on-failure
 
-run_experiment() {
-  local name="$1"
-  shift
+cmake -S . -B build-exp-native -DCMAKE_BUILD_TYPE=Release -DGEMMX_NATIVE=ON
+cmake --build build-exp-native -j
+ctest --test-dir build-exp-native --output-on-failure
+
+_run_with() {
+  local build_dir="$1" name="$2"
+  shift 2
   local out="results/raw/${name}"
   mkdir -p "$out"
-  ./build-exp/gemmx_benchmarks --experiment "$name" --git-commit "$COMMIT" \
+  "./${build_dir}/gemmx_benchmarks" --experiment "$name" --git-commit "$COMMIT" \
     --out "$out" "$@"
 }
+
+run_experiment() { _run_with build-exp "$@"; }
+run_experiment_native() { _run_with build-exp-native "$@"; }
