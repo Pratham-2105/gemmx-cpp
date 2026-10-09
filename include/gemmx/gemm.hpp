@@ -45,4 +45,9 @@ void gemm_loop_kij(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
 template <typename T>
 void gemm_loop_kji(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
 
+// V2: cache-blocked i-k-j with BS x BS tiles. BS is fixed at compile time.
+// Instantiated for BS in {16, 32, 48, 64, 96, 128, 192, 256}.
+template <typename T, std::size_t BS>
+void gemm_blocked(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+
 } // namespace gemmx

@@ -24,6 +24,7 @@ option(GEMMX_BUILD_BENCHMARKS "Build the benchmark executable" ON)
 add_library(gemmx_core STATIC
   src/gemm_reference.cpp
   src/gemm_loop_orders.cpp
+  src/gemm_blocked.cpp
 )
 target_include_directories(gemmx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(gemmx_core PUBLIC cxx_std_20)
