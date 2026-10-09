@@ -300,6 +300,7 @@ void write_metadata(const std::filesystem::path &path, std::string_view run_id,
                     const Options &o) {
   namespace si = gemmx::sysinfo;
   auto q = [](std::string_view s) { return "\"" + json_escape(s) + "\""; };
+  auto b = [](bool v) { return v ? "true" : "false"; };
 
   std::string sizes;
   for (std::size_t i = 0; i < o.sizes.size(); ++i) {
@@ -312,13 +313,14 @@ void write_metadata(const std::filesystem::path &path, std::string_view run_id,
     << "  \"experiment\": " << q(o.experiment) << ",\n"
     << "  \"git_commit\": " << q(o.git_commit) << ",\n"
     << "  \"cpu_model\": " << q(si::cpu_brand()) << ",\n"
+    << "  \"cpu_avx2\": " << b(si::cpu_avx2()) << ",\n"
+    << "  \"cpu_fma\": " << b(si::cpu_fma()) << ",\n"
     << "  \"logical_cpus\": " << std::thread::hardware_concurrency() << ",\n"
     << "  \"os\": " << q(si::os_string()) << ",\n"
     << "  \"compiler\": " << q(si::compiler_string()) << ",\n"
     << "  \"build_type\": " << q(si::build_type()) << ",\n"
     << "  \"cxx_flags\": " << q(si::cxx_flags()) << ",\n"
-    << "  \"march_native\": " << (si::native_enabled() ? "true" : "false")
-    << ",\n"
+    << "  \"march_native\": " << b(si::native_enabled()) << ",\n"
     << "  \"timer\": \"std::chrono::steady_clock\",\n"
     << "  \"timer_period_ns\": "
     << 1e9 * Clock::period::num / static_cast<double>(Clock::period::den)

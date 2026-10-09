@@ -9,6 +9,7 @@
 #if defined(_MSC_VER)
 #include <intrin.h>
 #elif defined(__x86_64__) || defined(__i386__)
+#include "gemmx/cpu_features.hpp"
 #include <cpuid.h>
 #endif
 
@@ -57,6 +58,24 @@ inline std::string cpu_brand() {
   return s.substr(first, last - first + 1);
 #else
   return "unknown (non-x86)";
+#endif
+}
+
+// Can this CPU + OS run AVX2 / FMA? (Same runtime checks the kernel
+// registry uses.) MSVC path not implemented yet -> reports false.
+inline bool cpu_avx2() {
+#if !defined(_MSC_VER) && (defined(__x86_64__) || defined(__i386__))
+  return gemmx::cpu_has_avx2();
+#else
+  return false;
+#endif
+}
+
+inline bool cpu_fma() {
+#if !defined(_MSC_VER) && (defined(__x86_64__) || defined(__i386__))
+  return gemmx::cpu_has_fma();
+#else
+  return false;
 #endif
 }
 
