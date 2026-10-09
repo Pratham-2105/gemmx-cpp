@@ -31,3 +31,33 @@ counters (unavailable in WSL2); TLB effects and P-/E-core placement unknown.
 same pattern (double 512 -> 0.672 vs 3.185/2.983; float 1024 -> 0.557 vs
 3.076/2.321). The effect does not depend on power mode, but absolute
 throughput does, by ~1.45x: power mode is a major confounder.
+
+---
+
+## EXP02 — Loop order (all six), portable vs native
+
+**Prediction:** ikj and kij will be fastest and nearly equal (inner loop
+streams rows of B and C); jki and kji slowest (inner loop walks columns of
+A and C); ijk (reference) and jik in between. The best-to-worst gap grows
+with n. In the native build, ikj/kij gain substantially over portable
+(auto-vectorized with wider AVX2 vectors), while ijk/jik barely change (their
+inner loop is a reduction, which the compiler may not vectorize without
+-ffast-math). The 4 KB-stride cliffs (float 1024, double 512/1024) appear in
+the column-walking orders (ijk, jik, jki, kji) but not in ikj/kij.
+
+**Result:** _pending_
+
+---
+
+## EXP03 — Cache-blocking block-size sweep
+
+**Prediction:** GFLOP/s vs block size has an interior optimum, expected in
+the 64–256 range: BS=16 may be no faster (or slower) than unblocked loop_ikj
+because of short inner loops, while the best block size clearly beats
+loop_ikj at n=2000/2048, where B no longer fits in L2. The optimum for
+double is at or below the optimum for float (twice the bytes per tile).
+Power-of-two sizes (1024, 2048) may still underperform 1000/2000 under
+blocking, due to self-interference between tile rows 4 KB apart (Lam,
+Rothberg & Wolf, 1991).
+
+**Result:** _pending_
