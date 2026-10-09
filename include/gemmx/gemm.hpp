@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <stdexcept>
 
 #include "gemmx/matrix.hpp"
@@ -28,10 +29,20 @@ void check_gemm_args(const Matrix<T> &A, const Matrix<T> &B,
   }
 }
 
-// Version 0: textbook i-j-k triple loop.
-// Serves as both the readable correctness reference and the performance
-// baseline.
+// V0: textbook i-j-k triple loop. Correctness reference and baseline.
 template <typename T>
 void gemm_reference(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+
+// V1: the other five loop orders (ijk is gemm_reference).
+template <typename T>
+void gemm_loop_ikj(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+template <typename T>
+void gemm_loop_jik(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+template <typename T>
+void gemm_loop_jki(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+template <typename T>
+void gemm_loop_kij(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+template <typename T>
+void gemm_loop_kji(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
 
 } // namespace gemmx

@@ -23,6 +23,7 @@ option(GEMMX_BUILD_BENCHMARKS "Build the benchmark executable" ON)
 # ---- Core library ------------------------------------------------------------
 add_library(gemmx_core STATIC
   src/gemm_reference.cpp
+  src/gemm_loop_orders.cpp
 )
 target_include_directories(gemmx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(gemmx_core PUBLIC cxx_std_20)
@@ -61,24 +62,4 @@ if(GEMMX_BUILD_TESTS)
 
   include(GoogleTest)
   gtest_discover_tests(gemmx_tests)
-endif()
-
-# ---- Benchmarks --------------------------------------------------------------
-if(GEMMX_BUILD_BENCHMARKS)
-  add_executable(gemmx_benchmarks benchmarks/benchmark_gemm.cpp)
-  target_link_libraries(gemmx_benchmarks PRIVATE gemmx_core)
-
-  # Record the exact build configuration inside the binary.
-  string(TOUPPER "${CMAKE_BUILD_TYPE}" _gemmx_bt)
-  target_compile_definitions(gemmx_benchmarks PRIVATE
-    "GEMMX_BUILD_TYPE=\"${CMAKE_BUILD_TYPE}\""
-    "GEMMX_CXX_FLAGS=\"${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_gemmx_bt}}\""
-    "GEMMX_NATIVE_ENABLED=$<BOOL:${GEMMX_NATIVE}>"
-  )
-
-  if(MSVC)
-    target_compile_options(gemmx_benchmarks PRIVATE /W4 /permissive-)
-  else()
-    target_compile_options(gemmx_benchmarks PRIVATE -Wall -Wextra -Wpedantic)
-  endif()
 endif()
