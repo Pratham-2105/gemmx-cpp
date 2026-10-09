@@ -50,4 +50,9 @@ void gemm_loop_kji(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
 template <typename T, std::size_t BS>
 void gemm_blocked(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
 
+// V3: cache-blocked (BS = 64) with the inner loop written in AVX2/FMA
+// intrinsics. Only call this if cpu_has_avx2_fma() is true
+// (the registry in kernels.hpp checks this for you).
+template <typename T>
+void gemm_avx2(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
 } // namespace gemmx

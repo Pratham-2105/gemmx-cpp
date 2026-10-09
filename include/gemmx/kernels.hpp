@@ -3,6 +3,7 @@
 #include <string_view>
 #include <vector>
 
+#include "gemmx/cpu_features.hpp"
 #include "gemmx/gemm.hpp"
 
 namespace gemmx {
@@ -19,7 +20,7 @@ template <typename T> struct NamedKernel {
 
 // THE registry. Add one line per new kernel; tests and benchmarks pick it up.
 template <typename T> std::vector<NamedKernel<T>> all_kernels() {
-  return {
+  std::vector<NamedKernel<T>> kernels = {
       {"reference", &gemm_reference<T>, 0}, // i-j-k
       {"loop_ikj", &gemm_loop_ikj<T>, 0},
       {"loop_jik", &gemm_loop_jik<T>, 0},
@@ -35,6 +36,12 @@ template <typename T> std::vector<NamedKernel<T>> all_kernels() {
       {"blocked_b192", &gemm_blocked<T, 192>, 192},
       {"blocked_b256", &gemm_blocked<T, 256>, 256},
   };
+
+  // V3: only registered when this CPU + OS can really run AVX2 and FMA.
+  if (cpu_has_avx2_fma()) {
+    kernels.push_back({"avx2_b64", &gemm_avx2<T>, 64});
+  }
+  return kernels;
 }
 
 } // namespace gemmx
