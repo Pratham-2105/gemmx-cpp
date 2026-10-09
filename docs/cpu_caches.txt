@@ -1,5 +1,13 @@
+# Output of `lscpu -C` under WSL2 (Ubuntu), i5-13450HX, 2026-10-09.
+# Note: WSL2 exposes a uniform view of 8 P-core-like CPUs (ALL-SIZE =
+# 8 x ONE-SIZE). The real chip is 6 P-cores (48K L1d, 1.25M L2 each)
+# + 4 E-cores (32K L1d each, one shared 2M L2), which WSL does not show.
+# V4 block sizes (KC=256, MC=288, NC=4096) are derived from the P-core
+# values below.
+
 NAME ONE-SIZE ALL-SIZE WAYS TYPE        LEVEL  SETS PHY-LINE COHERENCY-SIZE
 L1d       48K     384K   12 Data            1    64        1             64
 L1i       32K     256K    8 Instruction     1    64        1             64
 L2       1.3M      10M   10 Unified         2  2048        1             64
-L3        20M      20M   10 Unified         3 32768        1             64
+L3        20M      20M   10 Unified         3 32768        1             6
+
