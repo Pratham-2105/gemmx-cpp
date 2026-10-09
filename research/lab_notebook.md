@@ -45,7 +45,23 @@ inner loop is a reduction, which the compiler may not vectorize without
 -ffast-math). The 4 KB-stride cliffs (float 1024, double 512/1024) appear in
 the column-walking orders (ijk, jik, jki, kji) but not in ikj/kij.
 
-**Result:** _pending_
+**Result: mostly held; one partial miss.** Runs 20261009-062519 (portable),
+20261009-063213 (native), median of 5. A first attempt was discarded: a stale
+benchmark binary from older code was run, so its metadata did not match the
+code (fixed by always building fresh).
+- Ranking held: ikj/kij fastest, jki/kji slowest (below reference), ijk/jik
+  between. Native float best/worst gap grows from ~29x (n=128) to ~85x
+  (n=1024).
+- Native build sped up ikj by 1.5–2.7x (float) and 1.3–2.5x (double);
+  reference and jik unchanged (reduction not vectorized). The native gain
+  shrinks at large n (float ikj 2.7x at 256, 1.5x at 1024), consistent with
+  the kernel becoming memory-bound once B exceeds L2.
+- Power-of-two cliffs appear only in column-walking orders (reference float
+  1024: 0.51 vs 2.25 at 768); ikj shows none (22.7 vs 22.1).
+- Miss: ikj and kij are not equal at large n (native float 1024: 22.7 vs
+  13.9). kij streams the whole of C once per k; ikj keeps one C row in cache
+  across all k.
+Next: blocking (EXP03) to recover the memory-bound loss.
 
 ---
 
@@ -60,4 +76,16 @@ Power-of-two sizes (1024, 2048) may still underperform 1000/2000 under
 blocking, due to self-interference between tile rows 4 KB apart (Lam,
 Rothberg & Wolf, 1991).
 
-**Result:** _pending_
+**Result: held.** Run 20261009-063956 (native), median of 5.
+- Interior optimum at BS=64–96 for both types; BS=16 is slower than
+  unblocked ikj at n≈1000 (float 15.5 vs 23.0).
+- Best block vs unblocked ikj: float 1.5x (1000) to 2.2x (2000); double 1.7x
+  (1000) to 4.0x (2000, where unblocked ikj collapses to 4.5 GFLOP/s).
+- Power-of-two sizes remain slower under blocking: best block at 2048 is 27%
+  (float) and 32% (double) below 2000; large blocks degrade most (float b256:
+  30.9 at 2000 vs 17.8 at 2048), consistent with tile self-interference
+  (Lam et al., 1991).
+- Double optimum (64) at or below float (64–96), weakly.
+- Unexplained: double b96 dips at 1000/2000 (single-call samples; possibly
+  noise).
+Next: explicit AVX2/FMA (V3).
