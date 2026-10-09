@@ -122,6 +122,23 @@ Options parse_args(int argc, char **argv) {
   return o;
 }
 
+// Every requested kernel name must exist in the registry. A typo would
+// otherwise silently produce an experiment with missing kernels.
+bool validate_kernel_names(const Options &o) {
+  const auto registry = gemmx::all_kernels<float>(); // same names for double
+  bool ok = true;
+  for (const auto &name : o.kernels) {
+    const bool found =
+        std::any_of(registry.begin(), registry.end(),
+                    [&](const auto &k) { return k.name == name; });
+    if (!found) {
+      std::cerr << "unknown kernel '" << name << "'\n";
+      ok = false;
+    }
+  }
+  return ok;
+}
+
 // ---------------------------------------------------------------------------
 // Freivalds verification: checks C == A*B in O(n^2) instead of O(n^3).
 // Pick a random vector x and compare C*x against A*(B*x).
@@ -185,20 +202,31 @@ double median(std::vector<double> v) {
 template <typename T>
 bool run_dtype(const Options &o, std::string_view dtype,
                std::string_view run_id, std::ofstream &csv) {
+  // Select kernels once, in registry order.
+  std::vector<gemmx::NamedKernel<T>> selected;
+  for (const auto &k : gemmx::all_kernels<T>()) {
+    if (o.kernels.empty() || std::find(o.kernels.begin(), o.kernels.end(),
+                                       k.name) != o.kernels.end()) {
+      selected.push_back(k);
+    }
+  }
+
   bool all_ok = true;
 
-  for (const auto &k : gemmx::all_kernels<T>()) {
-    if (!o.kernels.empty() && std::find(o.kernels.begin(), o.kernels.end(),
-                                        k.name) == o.kernels.end()) {
-      continue;
-    }
+  // Sizes OUTER, kernels INNER: kernels compared at the same size run
+  // back-to-back, so slow thermal drift affects them alike.
+  for (std::size_t n : o.sizes) {
+    // Setup: allocation + data generation, never inside the timed region.
+    // Inputs are shared by all kernels at this size.
+    gemmx::Matrix<T> A(n, n), B(n, n), C(n, n);
+    gemmx::fill_random(A, o.seed);
+    gemmx::fill_random(B, o.seed + 1);
 
-    for (std::size_t n : o.sizes) {
-      // Setup: allocation + data generation, never inside the timed region.
-      gemmx::Matrix<T> A(n, n), B(n, n), C(n, n);
-      gemmx::fill_random(A, o.seed);
-      gemmx::fill_random(B, o.seed + 1);
+    const double flops = 2.0 * static_cast<double>(n) * static_cast<double>(n) *
+                         static_cast<double>(n);
+    const double min_ns = o.min_sample_ms * 1e6;
 
+    for (const auto &k : selected) {
       // 1) Warm-up call. It also measures one call for calibration and
       //    produces the output we verify.
       const auto t0 = Clock::now();
@@ -217,15 +245,15 @@ bool run_dtype(const Options &o, std::string_view dtype,
       // 3) Calibration: repeat the call enough times that one timed sample
       //    lasts at least min_sample_ms, so fast runs aren't lost in timer
       //    noise.
-      const double min_ns = o.min_sample_ms * 1e6;
       const std::size_t iters =
           (once_ns >= min_ns) ? 1
                               : static_cast<std::size_t>(
                                     std::ceil(min_ns / std::max(once_ns, 1.0)));
 
+      const std::string block =
+          k.block_size > 0 ? std::to_string(k.block_size) : "";
+
       // 4) Timed repetitions. Every sample is written to the CSV.
-      const double flops = 2.0 * static_cast<double>(n) *
-                           static_cast<double>(n) * static_cast<double>(n);
       std::vector<double> samples;
       for (int rep = 0; rep < o.reps; ++rep) {
         const auto s0 = Clock::now();
@@ -239,14 +267,14 @@ bool run_dtype(const Options &o, std::string_view dtype,
         samples.push_back(gflops);
 
         csv << run_id << ',' << k.name << ',' << dtype << ',' << n << ',' << n
-            << ',' << n << ",," << 1 << ',' << rep << ',' << iters << ','
-            << std::format("{:.0f}", per_call_ns) << ','
+            << ',' << n << ',' << block << ',' << 1 << ',' << rep << ','
+            << iters << ',' << std::format("{:.0f}", per_call_ns) << ','
             << std::format("{:.4f}", gflops) << '\n';
       }
       csv.flush(); // a crash later can't lose finished configurations
 
       std::cout << std::format(
-          "{:<12} {:<6} n={:<5} iters={:<5} median {:8.3f} GFLOP/s\n", k.name,
+          "{:<14} {:<6} n={:<5} iters={:<5} median {:8.3f} GFLOP/s\n", k.name,
           dtype, n, iters, median(samples));
     }
   }
@@ -299,6 +327,7 @@ void write_metadata(const std::filesystem::path &path, std::string_view run_id,
     << "  \"reps\": " << o.reps << ",\n"
     << "  \"min_sample_ms\": " << o.min_sample_ms << ",\n"
     << "  \"seed\": " << o.seed << ",\n"
+    << "  \"ordering\": \"sizes outer, kernels inner\",\n"
     << "  \"warmup\": \"1 untimed call per configuration (also used for "
        "calibration and verification)\",\n"
     << "  \"verification\": \"Freivalds check on warm-up output before "
@@ -311,6 +340,8 @@ void write_metadata(const std::filesystem::path &path, std::string_view run_id,
 
 int main(int argc, char **argv) {
   const Options o = parse_args(argc, argv);
+  if (!validate_kernel_names(o))
+    return 1;
 
   namespace fs = std::filesystem;
   fs::create_directories(o.out_dir);
