@@ -112,4 +112,31 @@ Both stay well below the core's FMA peak: every FMA also loads and stores a
 vector of C, so the kernel is bound by load/store traffic, not arithmetic.
 This motivates register blocking (V4): keep a tile of C in registers across k.
 
-**Result:** (pending)
+**Result: partially held.** Runs 20261009-090605 (portable),
+20261009-090853 (native), median of 5.
+- Portable: avx2_b64 beats SSE2-only blocked_b64 by 1.5–2.0x in 9 of 10
+  configurations (float 2.04x at 1000, double 1.61–1.83x); exception float
+  n=512 (1.11x, see below). Held.
+- Native: the compiler-vectorized blocked_b64 is equal or faster than the
+  hand-written intrinsics in 9 of 10 configurations: avx2/native ratio
+  0.81–0.94 (float), 0.86–1.03 (double); largest gap at non-power-of-two
+  sizes (float 1000: 26.1 vs 32.3; float 2000: 25.3 vs 30.3), near-tie at
+  1024/2048, where both kernels are limited by tile self-interference
+  (EXP03). Partial miss: predicted a tie within ~10%. Hypothesis (unverified):
+  GCC unrolls the vectorized inner loop; the intrinsic loop issues one
+  load-FMA-store per iteration. To check: compare disassembly.
+- Reproducibility: avx2_b64 is identical code in both builds and agrees
+  within ~5–15% across the two runs (e.g. float 2000: 25.9 vs 25.3), which
+  bounds run-to-run variation; the native gap is consistent in direction but
+  close to that variation in size.
+- Unexplained: portable float n=512 avx2_b64 (16.6) is well below the same
+  code in the native run (24.1); n=512 is the first size measured after the
+  build and tests, so a frequency warm-up effect is possible.
+- Side finding: native float n=512, unblocked loop_ikj (34.5) beats all
+  blocked kernels (B = 1 MB fits in L2), consistent with EXP03: blocking
+  pays only once B exceeds the cache.
+- Best single-thread result so far ~32 GFLOP/s float, roughly 11% of an
+  estimated P-core FMA peak (~290 GFLOP/s at ~4.5 GHz). Both kernels load and
+  store C on every FMA.
+Next: register-blocked microkernel (V4): keep a tile of C in registers
+across k.
