@@ -140,3 +140,19 @@ This motivates register blocking (V4): keep a tile of C in registers across k.
   store C on every FMA.
 Next: register-blocked microkernel (V4): keep a tile of C in registers
 across k.
+
+---
+
+## EXP05 — Packed panels + register-blocked microkernel (V4)
+
+**Prediction** (written after one scratch sanity run at n=1000/1024 on the
+portable build, not cited): `packed` (6x16 float / 6x8 double microkernel,
+12 YMM accumulators, KC=256, MC=288, NC=4096) beats the native
+compiler-vectorized blocked_b64 by 3–5x at n >= 1000 for both types,
+reaching ~35–50% of the estimated single-P-core FMA peak (~290 GFLOP/s
+float, ~145 double). The power-of-two penalty that survived blocking in
+EXP03 (27–32%) shrinks below ~10%, because packed panels are contiguous and
+no longer inherit the 4 KB row stride. At n=512 the gain is smaller (B fits
+in L2, so packing overhead is a larger share).
+
+**Result:** (pending)
