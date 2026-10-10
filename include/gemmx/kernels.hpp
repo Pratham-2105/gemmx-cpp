@@ -15,7 +15,7 @@ using KernelFn = void (*)(const Matrix<T> &, const Matrix<T> &, Matrix<T> &);
 template <typename T> struct NamedKernel {
   std::string_view name;
   KernelFn<T> fn;
-  int block_size; // 0 = not a blocked kernel
+  int block_size; // 0 = not a single-BS blocked kernel
 };
 
 // THE registry. Add one line per new kernel; tests and benchmarks pick it up.
@@ -37,9 +37,10 @@ template <typename T> std::vector<NamedKernel<T>> all_kernels() {
       {"blocked_b256", &gemm_blocked<T, 256>, 256},
   };
 
-  // V3: only registered when this CPU + OS can really run AVX2 and FMA.
+  // V3 + V4: only registered when this CPU + OS can really run AVX2 and FMA.
   if (cpu_has_avx2_fma()) {
     kernels.push_back({"avx2_b64", &gemm_avx2<T>, 64});
+    kernels.push_back({"packed", &gemm_packed<T>, 0}); // MC/KC/NC: see source
   }
   return kernels;
 }

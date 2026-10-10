@@ -55,4 +55,11 @@ void gemm_blocked(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
 // (the registry in kernels.hpp checks this for you).
 template <typename T>
 void gemm_avx2(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+
+// V4: packed A/B panels + register-blocked AVX2/FMA microkernel
+// (6x16 float, 6x8 double), Goto/BLIS 5-loop structure,
+// KC = 256, MC = 288, NC = 4096. Requires AVX2 + FMA (registry checks).
+template <typename T>
+void gemm_packed(const Matrix<T> &A, const Matrix<T> &B, Matrix<T> &C);
+
 } // namespace gemmx

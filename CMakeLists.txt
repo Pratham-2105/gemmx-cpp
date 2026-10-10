@@ -23,6 +23,7 @@ add_library(gemmx_core STATIC
   src/gemm_loop_orders.cpp
   src/gemm_blocked.cpp
   src/gemm_avx2.cpp
+  src/gemm_packed.cpp
 )
 target_include_directories(gemmx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(gemmx_core PUBLIC cxx_std_20)
