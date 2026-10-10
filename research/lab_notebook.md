@@ -155,4 +155,25 @@ EXP03 (27–32%) shrinks below ~10%, because packed panels are contiguous and
 no longer inherit the 4 KB row stride. At n=512 the gain is smaller (B fits
 in L2, so packing overhead is a larger share).
 
-**Result:** (pending)
+**Result: partially held.** Run 20261010-172006 (native), median of 5.
+- Power-of-two penalty removed (held): packed 1024 vs 1000 is -0.4% (float)
+  and -0.5% (double); 2048 vs 2000 is -7.7% and -3.2%, versus -29% and -32%
+  for native blocked_b64 in the same run. Packed panels are contiguous, so
+  the 4 KB row stride of EXP01–03 no longer reaches the inner loop.
+- Speed-up over native blocked_b64: 2.5–3.5x (float), 1.9–2.9x (double);
+  below the predicted 3–5x. Confounder: the baseline itself was ~1.4x faster
+  than in EXP04 (float n=1000: 46.3 vs 32.3; double: 23.8 vs 16.0), same
+  kernel, same conditions, cause unknown (thermal state / background load
+  possible). Against EXP04's baseline the ratio would be ~3.9x. Lesson:
+  compare kernels only within a single run; headline numbers come from the
+  final ladder.
+- Miss: n=512 does not show a smaller gain; packed float peaks there (126.8).
+- Peak fraction: float 98–127 GFLOP/s (34–44% of ~290 est.); double 45–52
+  (31–36% of ~145 est.).
+- Pattern: float packed is flat (~125) up to n=1024, drops to 106/98 at
+  2000/2048; double is flat (45–48) from n=1000. Both drops coincide with the
+  packed B block (KC x N x elem) outgrowing L2 (1.25 MB): float 1 MB at 1024
+  -> 2 MB at 2000; double 1 MB at 512 -> 2 MB at 1000. Hypothesis
+  (untested): a smaller NC that keeps packed B in L2 recovers the large-n
+  loss; testable with an NC sweep.
+Next: OpenMP multithreading (V5).
