@@ -13,15 +13,15 @@ This is also my Research Methodology project, so every result comes with the raw
 - [x] EXP01: cache conflict at power-of-two sizes
 - [x] EXP02: all six loop orders
 - [x] EXP03: cache blocking
-- [ ] AVX2/FMA SIMD
-- [ ] Register-blocked microkernel
+- [x] EXP04: AVX2/FMA SIMD
+- [x] EXP05: register-blocked microkernel + packing
 - [ ] Multithreading
 - [ ] Comparison with OpenBLAS
 - [ ] P-core vs E-core experiments
 
 ## Results so far
 
-All numbers are single-threaded, median of 5–7 runs, in GFLOP/s.
+All numbers are single-threaded, median of 5–7 runs, in GFLOP/s. Kernels are only compared within the same run.
 
 ### 1. The 512 cliff
 
@@ -61,11 +61,38 @@ Once the matrix stops fitting in cache, even the best loop order slows down, bec
 
 The best tile size was 64–96. Tiles that are too small waste time on loop overhead; tiles that are too big stop fitting in cache. Power-of-two sizes still lose about 30% even with blocking (2048 vs 2000), for the same reason as the 512 cliff.
 
+### 4. Hand-written AVX2: the compiler already did it
+
+Next I rewrote the blocked kernel's inner loop with AVX2/FMA intrinsics, processing 8 floats (or 4 doubles) per instruction. The AVX2 code is switched on per function and only used if the CPU supports it, so the rest of the program stays portable.
+
+| float, n=1000 | portable build | `-march=native` build |
+|---|---|---|
+| blocked, compiler code | 13.5 | **32.3** |
+| blocked, my AVX2 | **27.6** | 26.1 |
+
+Against the portable build (old SSE2 only), my version was 1.5–2× faster. But with `-march=native` the compiler vectorizes the same loop by itself, and it beat my version by up to ~19%. Writing intrinsics alone wasn't the win. Both versions still load and store C on every single multiply-add, and that memory traffic is the real limit.
+
+### 5. Microkernel + packing: ~3× faster, and the 4 KB cliff is gone
+
+This is the approach real BLAS libraries use (Goto/BLIS). Two ideas:
+
+- **Keep C in registers.** A small "microkernel" computes a 6×16 tile of C (6×8 for double) in 12 AVX2 registers for 256 steps, and only then writes it back to memory.
+- **Pack A and B first.** Copy blocks of A and B into buffers laid out in exactly the order the microkernel reads them, so it streams memory in a straight line. Block sizes come from my CPU's cache sizes (`docs/cpu_caches.txt`).
+
+| float | n=1000 | n=2000 | n=2048 |
+|---|---|---|---|
+| blocked, compiler code | 46.3 | 42.9 | 30.3 |
+| **packed microkernel** | **125.0** | **106.3** | **98.1** |
+
+That's 2.5–3.5× faster for float and 1.9–2.9× for double, up to about 44% of the theoretical peak of one core. Because the packed buffers are contiguous, the power-of-two penalty mostly disappears: 2048 is only ~8% slower than 2000 now, instead of ~30%.
+
+Float performance drops at n=2000. My best guess is that the packed copy of B stops fitting in L2 cache at that size, and double drops at exactly the size where its (twice as big) copy stops fitting. I haven't proven it yet; a block-size sweep will.
+
 Raw data: [`results/raw/`](results/raw/) · Predictions and notes for every experiment: [`research/lab_notebook.md`](research/lab_notebook.md)
 
 ## Running it
 
-You need Linux (I use WSL2), GCC 13 or newer, and CMake 3.24 or newer.
+You need Linux (I use WSL2), GCC 13 or newer, and CMake 3.24 or newer. The AVX2 and packed kernels need an x86 CPU with AVX2 and FMA (most Intel/AMD CPUs since ~2013); on other CPUs they're skipped automatically.
 
 ```bash
 git clone https://github.com/Pratham-2105/gemmx-cpp.git
@@ -89,29 +116,10 @@ Reproduce an experiment exactly as I ran it:
 ./experiments/exp01_pow2_conflict.sh
 ./experiments/exp02_loop_orders.sh
 ./experiments/exp03_block_size.sh
+./experiments/exp04_avx2.sh
+./experiments/exp05_packed.sh
 ```
 
-Each script builds the code fresh, runs the tests, and only then benchmarks. EXP02 and EXP03 take 10–20 minutes each, because the slow kernels really are slow. Your numbers will differ depending on your CPU, but the patterns should show up on most x86 machines.
+Each script builds the code fresh, runs the tests, and only then benchmarks. It also refuses to run on battery, because power mode alone changed my results by ~1.45×. EXP02 and EXP03 take 10–20 minutes each, because the slow kernels really are slow. Your numbers will differ depending on your CPU, but the patterns should show up on most x86 machines.
 
 ## How it's organized
-
-```
-include/gemmx/   matrix type and kernel interface
-src/             the kernels
-tests/           correctness tests
-benchmarks/      benchmark tool
-experiments/     one script per experiment
-results/raw/     raw data from every experiment
-research/        lab notebook: predictions before, results after
-docs/            machine details (cache sizes)
-```
-
-Every kernel has to pass the correctness tests before it gets benchmarked. Every result in this README comes from a file in `results/raw/`.
-
-## Setup
-
-Intel Core i5-13450HX (6 performance + 4 efficiency cores), 24 GB RAM, Windows 11 + WSL2, GCC 15.2. Benchmarks run plugged in, in Best performance mode.
-
-## License
-
-MIT
