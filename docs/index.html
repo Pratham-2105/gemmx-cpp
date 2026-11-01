@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>From Naive Loops to a Packed Microkernel: a CPU GEMM Worklog</title>
+<meta name="description" content="Step-by-step optimization of single-threaded matrix multiplication in C++ on an Intel Core i5-13450HX, from 0.5 to 125 GFLOP/s.">
+<style>
+  /* ET Book: Edward Tufte's typeface, via tufte-css (MIT), served by jsDelivr */
+  @font-face {
+    font-family: "et-book";
+    src: url("https://cdn.jsdelivr.net/gh/edwardtufte/tufte-css@gh-pages/et-book/et-book-roman-line-figures/et-book-roman-line-figures.woff") format("woff");
+    font-weight: normal; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: "et-book";
+    src: url("https://cdn.jsdelivr.net/gh/edwardtufte/tufte-css@gh-pages/et-book/et-book-display-italic-old-style-figures/et-book-display-italic-old-style-figures.woff") format("woff");
+    font-weight: normal; font-style: italic; font-display: swap;
+  }
+  @font-face {
+    font-family: "et-book";
+    src: url("https://cdn.jsdelivr.net/gh/edwardtufte/tufte-css@gh-pages/et-book/et-book-bold-line-figures/et-book-bold-line-figures.woff") format("woff");
+    font-weight: bold; font-style: normal; font-display: swap;
+  }
+
+  :root {
+    --bg: #fffff8;
+    --fg: #111;
+    --muted: #555;
+    --rule: #333;
+    --cell: #f9f5ef;
+    --link: #a00000;
+    --codebg: #fffffc;
+    --codeborder: #c9c9c0;
+    --mono: Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { font-size: 15px; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: et-book, Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  article { max-width: 800px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  h1 { font-weight: normal; font-size: 2.6rem; line-height: 1.2; margin: 0 0 22px; }
+  h2 { font-weight: normal; font-size: 2rem; line-height: 1.25; margin: 2.4rem 0 1rem; }
+  h3 { font-weight: normal; font-style: italic; font-size: 1.55rem; margin: 1.8rem 0 .8rem; }
+
+  p, li { font-size: 1.4rem; line-height: 1.6; }
+  p { margin: 0 0 1.2rem; text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+  ul, ol { padding-left: 1.6rem; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  em { font-style: italic; }
+
+  /* header row: badges left, date right */
+  .meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 32px; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge {
+    font: 12px/1 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #333; background: linear-gradient(#fdfdfd, #ececec);
+    border: 1px solid #bbb; border-radius: 3px; padding: 4px 8px;
+  }
+  .badge:hover { text-decoration: none; background: #e8e8e8; }
+  .date { font-size: 1.4rem; }
+  .byline { font-size: 1.25rem; color: var(--muted); margin: -12px 0 18px; font-style: italic; }
+
+  /* inline code */
+  code { font-family: var(--mono); font-size: 0.8em; }
+
+  /* code blocks */
+  pre {
+    background: var(--codebg); border: 1px solid var(--codeborder); border-radius: 3px;
+    padding: 12px 14px; margin: 0 0 1.4rem; overflow-x: auto;
+    font-family: var(--mono); font-size: 0.9rem; line-height: 1.45; text-align: left;
+  }
+  pre code { font-size: inherit; }
+
+  /* tables, styled like the worklog summary */
+  .table-wrap { overflow-x: auto; margin: 0 0 1.6rem; }
+  table { border-collapse: separate; border-spacing: 0 3px; font-size: 1.15rem; }
+  th { font-weight: normal; text-align: left; padding: 6px 14px 8px 10px; border-bottom: 1px solid var(--rule); }
+  td { background: var(--cell); padding: 6px 14px 6px 10px; text-align: left; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 0.95rem; }
+  th.num { font-family: inherit; font-size: inherit; }
+  tr.hl td { font-weight: bold; }
+  .table-note { font-size: 1.05rem; color: var(--muted); margin: -1rem 0 1.6rem; text-align: left; }
+
+  /* figures: hidden automatically until the image file exists */
+  figure { margin: 0 0 1.6rem; }
+  figure img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption { font-size: 1.1rem; color: var(--muted); text-align: left; margin-top: 6px; line-height: 1.4; }
+
+  /* footnote markers */
+  sup.fn { font-size: 0.7em; line-height: 0; }
+  sup.fn a { color: var(--link); }
+  .footnotes { margin-top: 3rem; border-top: 1px solid #ccc; padding-top: 1rem; }
+  .footnotes ol li { font-size: 1.1rem; line-height: 1.5; margin-bottom: .6rem; text-align: left; }
+  .footnotes .back { font-size: .9rem; }
+
+  .refs li { font-size: 1.1rem; text-align: left; }
+  hr { border: 0; border-top: 1px solid #ccc; margin: 2.4rem 0; }
+
+  @media (max-width: 640px) {
+    html { font-size: 13px; }
+    article { padding: 28px 16px 64px; }
+    p { text-align: left; hyphens: manual; }
+    h1 { font-size: 2.1rem; }
+  }
+</style>
+</head>
+<body>
+<article>
+
+<h1>From Naive Loops to a Packed Microkernel: a CPU GEMM Worklog</h1>
+
+<div class="meta">
+  <div class="badges">
+    <a class="badge" href="https://github.com/Pratham-2105/gemmx-cpp" target="_blank" rel="noopener">GitHub · gemmx-cpp</a>
+    <a class="badge" href="paper.pdf" target="_blank" rel="noopener">Paper (PDF)</a>
+    <a class="badge" id="linkedin" href="https://www.linkedin.com/in/YOUR-HANDLE" target="_blank" rel="noopener">LinkedIn</a>
+  </div>
+  <span class="date">November 2026</span>
+</div>
+<p class="byline">Pratham Srivastava</p>
+
+<p>In this post, I iteratively optimize a single-threaded implementation of matrix multiplication (GEMM) in C++20 on my laptop CPU, an Intel Core i5-13450HX. The goal isn't to build a BLAS replacement. It's to measure, one idea at a time, how much each classic technique (loop order, cache blocking, SIMD, register blocking and packing) is actually worth on one real machine, instead of taking it on trust. Every step was run as an experiment: I wrote a prediction down before the run<sup class="fn" id="r1"><a href="#f1">1</a></sup>, verified every kernel before timing it<sup class="fn" id="r2"><a href="#f2">2</a></sup>, and kept the cases where I was wrong.</p>
+
+<p>Matrix multiplication is the central kernel of dense linear algebra and of nearly all deep-learning training and inference. Its arithmetic is fixed at 2n³ floating-point operations, but its speed is not: the same arithmetic can run hundreds of times faster or slower depending on how it uses caches, SIMD units and registers. I start with the textbook triple loop and end at about 43% of the core's estimated peak<sup class="fn" id="r3"><a href="#f3">3</a></sup>:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Kernel</th><th class="num">GFLOP/s</th><th class="num">% of single-core peak</th></tr></thead>
+  <tbody>
+    <tr><td>V0: Naive (ijk)</td><td class="num">0.53</td><td class="num">0.2%</td></tr>
+    <tr><td>V1: Loop order (ikj)</td><td class="num">22.71</td><td class="num">7.7%</td></tr>
+    <tr><td>V2: Cache blocking</td><td class="num">28.46</td><td class="num">9.7%</td></tr>
+    <tr><td>V3: AVX2/FMA intrinsics</td><td class="num">23.36</td><td class="num">7.9%</td></tr>
+    <tr class="hl"><td>V4: Packed 6×16 microkernel</td><td class="num">124.52</td><td class="num">42.3%</td></tr>
+    <tr><td>Peak (estimated)</td><td class="num">294.4</td><td class="num">100.0%</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="table-note">Single precision, n = 1024, native build, median of 5. Values come from different runs, so cross-row ratios are approximate<sup class="fn" id="r4"><a href="#f4">4</a></sup>.</p>
+
+<p>Yes, V3 is slower than V2. That's not a typo. It's the most useful result in the whole study, and it's why V4 looks the way it does.</p>
+
+<figure>
+  <img src="images/roofline.png" alt="Roofline plot with V0 to V4 climbing toward the 294.4 GFLOP/s compute roof" onerror="this.closest('figure').remove()">
+  <figcaption>V0–V4 against the single-core roofline.</figcaption>
+</figure>
+
+<h2>Setup</h2>
+
+<p>All experiments ran on one laptop: an Intel Core i5-13450HX (Raptor Lake-HX, 6 performance cores plus 4 efficiency cores) with a 48 KiB 12-way L1d, a 1.25 MiB L2 and a 20 MiB shared L3, under Windows 11 + WSL2<sup class="fn" id="r5"><a href="#f5">5</a></sup>. Code is compiled with GCC 15.2 at <code>-O3</code> in two builds: <em>portable</em> (baseline x86-64, so SSE2 only) and <em>native</em> (<code>-march=native</code>, so AVX2 and FMA). All kernels share one interface: row-major A, B and C, with C overwritten.</p>
+
+<p>Throughput is reported as GFLOP/s = 2n³ / t. Every sample lasts at least 50 ms, every configuration is repeated five times and the median is reported. Every run writes its raw samples to CSV, together with the git commit, compiler and flags. Across the 316 configurations in the study, the median interquartile range was 1.6% of the median.</p>
+
+<h2>V0: Naive Implementation</h2>
+
+<p>The starting point is the triple loop straight out of a textbook. For each cell of C, walk along a row of A and down a column of B, and sum the products:</p>
+
+<pre><code>for (std::size_t i = 0; i &lt; M; ++i) {
+  for (std::size_t j = 0; j &lt; N; ++j) {
+    T sum = T{0};
+    for (std::size_t k = 0; k &lt; K; ++k) {
+      // A(i, k) walks along a row: contiguous.
+      // B(k, j) walks down a column: stride of N elements per step.
+      sum += A(i, k) * B(k, j);
+    }
+    C(i, j) = sum;
+  }
+}</code></pre>
+
+<p>The problem is the inner loop's access to B. Matrices are stored row-major, so consecutive elements of a column of B are a whole row apart in memory. Every step of <code>k</code> lands on a new 64-byte cache line and uses 4 or 8 bytes of it. At n = 1024 in single precision, V0 runs at 0.53 GFLOP/s, about 0.2% of what the core can do.</p>
+
+<figure>
+  <img src="images/fig-v0-layout.png" alt="A row of A read contiguously, a column of B read with stride n" onerror="this.closest('figure').remove()">
+  <figcaption>The naive kernel reads A along a row but B down a column, one new cache line per step.</figcaption>
+</figure>
+
+<h3>The 4 KiB cliff</h3>
+
+<p>The naive kernel has a stranger problem too. Around n = 512 in double precision, throughput doesn't degrade smoothly. It falls off a cliff: 4.61 GFLOP/s at n = 511, then 0.92 at n = 512, a 5.0× collapse from adding one row and column. Single precision does the same thing at n = 1024 (4.17 → 0.79 GFLOP/s, 5.4×).</p>
+
+<p>Both sizes have one thing in common: a row stride of exactly 4096 bytes. A cache line's set is fixed by its address. If a column's accesses are a stride of <em>s</em> cache lines apart, the column only touches 64 / gcd(<em>s</em>, 64) of the 64 L1 sets. At <em>s</em> = 64, every element of the column maps to <em>the same set</em>. A column of 512 values competes for 12 slots and keeps evicting itself, while the other 63 sets sit empty. The model predicts smaller dips too: n = 496 and 528 (<em>s</em> = 62 and 66, 32 sets each) are slower than 504 and 520 (<em>s</em> = 63 and 65, all 64 sets). That's what the data shows.</p>
+
+<figure>
+  <img src="images/fig-v0-cache-sets.png" alt="Column accesses with a 4096-byte stride all landing in one cache set" onerror="this.closest('figure').remove()">
+  <figcaption>With a 4096-byte row stride, an entire column maps to a single 12-way L1 set.</figcaption>
+</figure>
+
+<figure>
+  <img src="images/exp01-pow2.png" alt="EXP01: naive kernel throughput around the 4 KiB row-stride sizes" onerror="this.closest('figure').remove()">
+  <figcaption>EXP01. Naive kernel throughput around the 4 KiB row-stride sizes. Solid: standard conditions. Dashed: Windows power-saving mode, about 1.45× slower overall, but the same cliff.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th class="num">n</th><th class="num">Stride (B)</th><th class="num">s (lines)</th><th class="num">Sets spanned</th><th class="num">GFLOP/s</th></tr></thead>
+  <tbody>
+    <tr><td class="num">496</td><td class="num">3968</td><td class="num">62</td><td class="num">32</td><td class="num">3.26</td></tr>
+    <tr><td class="num">504</td><td class="num">4032</td><td class="num">63</td><td class="num">64</td><td class="num">4.14</td></tr>
+    <tr><td class="num">511</td><td class="num">4088</td><td class="num">—</td><td class="num">—</td><td class="num">4.61</td></tr>
+    <tr class="hl"><td class="num">512</td><td class="num">4096</td><td class="num">64</td><td class="num">1</td><td class="num">0.92</td></tr>
+    <tr><td class="num">513</td><td class="num">4104</td><td class="num">—</td><td class="num">—</td><td class="num">4.54</td></tr>
+    <tr><td class="num">520</td><td class="num">4160</td><td class="num">65</td><td class="num">64</td><td class="num">3.94</td></tr>
+    <tr><td class="num">528</td><td class="num">4224</td><td class="num">66</td><td class="num">32</td><td class="num">3.27</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="table-note">Double precision, naive kernel. The set model applies only when the stride is a whole number of 64-byte lines (“—” otherwise).</p>
+
+<p>The prediction held. Hardware counters weren't available under WSL2, so I can't rule out TLB effects contributing as well<sup class="fn" id="r6"><a href="#f6">6</a></sup>. Keep this cliff in mind, because packing in V4 is what finally removes it.</p>
+
+<h2>V1: Loop Order</h2>
+
+<p>The three loops can be nested in six orders. All six do identical arithmetic, so the only thing that changes is the memory access pattern. Here's ikj:</p>
+
+<pre><code>for (std::size_t i = 0; i &lt; M; ++i) {
+  T *crow = c + i * N;
+  for (std::size_t k = 0; k &lt; K; ++k) {
+    const T aik = a[i * K + k];
+    const T *brow = b + k * N;
+    for (std::size_t j = 0; j &lt; N; ++j) {
+      crow[j] += aik * brow[j];
+    }
+  }
+}</code></pre>
+
+<p>Now the inner loop takes one scalar of A and streams a whole row of B into a whole row of C. Both are contiguous, so every byte of every cache line gets used. And because there's no reduction anymore, the compiler is free to vectorize it.</p>
+
+<figure>
+  <img src="images/fig-v1-loop-orders.png" alt="ijk reduction down a column of B versus ikj streaming rows of B and C" onerror="this.closest('figure').remove()">
+  <figcaption>ijk reduces down a column of B. ikj streams rows of B and C.</figcaption>
+</figure>
+
+<p>The spread between orders is enormous, up to 85× at n = 1024:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Order</th><th class="num">Portable 256</th><th class="num">Native 256</th><th class="num">Portable 1024</th><th class="num">Native 1024</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>ikj</td><td class="num">15.50</td><td class="num">41.18</td><td class="num">15.46</td><td class="num">22.71</td></tr>
+    <tr><td>kij</td><td class="num">18.43</td><td class="num">25.83</td><td class="num">12.19</td><td class="num">13.91</td></tr>
+    <tr><td>ijk (V0)</td><td class="num">2.81</td><td class="num">2.94</td><td class="num">0.51</td><td class="num">0.53</td></tr>
+    <tr><td>jik</td><td class="num">2.80</td><td class="num">2.82</td><td class="num">0.53</td><td class="num">0.53</td></tr>
+    <tr><td>jki</td><td class="num">0.71</td><td class="num">0.71</td><td class="num">0.24</td><td class="num">0.27</td></tr>
+    <tr><td>kji</td><td class="num">0.72</td><td class="num">0.71</td><td class="num">0.27</td><td class="num">0.27</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="table-note">Single precision, GFLOP/s, median of 5.</p>
+
+<figure>
+  <img src="images/exp02-loop-orders.png" alt="EXP02: all six loop orders, log scale" onerror="this.closest('figure').remove()">
+  <figcaption>EXP02. All six loop orders, native build, log scale. ijk and jik overlap, as do jki and kji.</figcaption>
+</figure>
+
+<p>As predicted, ikj and kij are fastest because they stream rows of B and C, and jki and kji are slowest because they walk columns of A and C. With <code>-march=native</code>, GCC vectorized ikj with AVX2 and sped it up 1.5–2.7×. ijk and jik didn't move at all, because their inner loop is a sum reduction<sup class="fn" id="r7"><a href="#f7">7</a></sup>. The power-of-two cliffs only showed up in the column-walking orders.</p>
+
+<p>One prediction failed. I expected ikj and kij to tie, but at n = 1024 ikj is clearly ahead (22.7 vs. 13.9 GFLOP/s). The reason: kij streams <em>all of C</em> once for every value of k, while ikj keeps one row of C in cache across the whole k loop.</p>
+
+<h2>V2: Cache Blocking</h2>
+
+<p>ikj is good while B fits in cache. Once it doesn't, every row of C drags the whole of B through the memory hierarchy again. Cache blocking fixes this by splitting the work into BS×BS tiles that are small enough to stay cached while they're reused. The tiles are visited in ii-kk-jj order, with ikj inside each tile:</p>
+
+<pre><code>for (std::size_t ii = 0; ii &lt; M; ii += BS) {
+  const std::size_t i_end = std::min(ii + BS, M);
+  for (std::size_t kk = 0; kk &lt; K; kk += BS) {
+    const std::size_t k_end = std::min(kk + BS, K);
+    for (std::size_t jj = 0; jj &lt; N; jj += BS) {
+      const std::size_t j_end = std::min(jj + BS, N);
+      for (std::size_t i = ii; i &lt; i_end; ++i) {
+        T *crow = c + i * N;
+        for (std::size_t k = kk; k &lt; k_end; ++k) {
+          const T aik = a[i * K + k];
+          const T *brow = b + k * N;
+          for (std::size_t j = jj; j &lt; j_end; ++j)
+            crow[j] += aik * brow[j];
+        }
+      }
+    }
+  }
+}</code></pre>
+
+<p>Inside one tile step, the BS×BS tile of B is reused for every row of the tile, each <code>a(i,k)</code> is reused across BS columns, and each row segment of C stays hot across BS values of k.</p>
+
+<figure>
+  <img src="images/fig-v2-tiling.png" alt="Matrix split into BS by BS tiles, with one tile held in L1/L2" onerror="this.closest('figure').remove()">
+  <figcaption>A tile small enough to stay in L1/L2 gets reused many times before it's evicted.</figcaption>
+</figure>
+
+<p>I swept BS from 16 to 256. As predicted, there's an interior optimum at BS = 64–96. Very small tiles are slower than plain ikj because the inner loop is too short, and very large tiles stop fitting in cache.</p>
+
+<figure>
+  <img src="images/exp03-block-size.png" alt="EXP03: blocked kernel throughput versus tile size" onerror="this.closest('figure').remove()">
+  <figcaption>EXP03. Throughput of the blocked kernel versus tile size, native build.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Type, n</th><th class="num">ikj</th><th class="num">Best BS</th><th class="num">Blocked</th><th class="num">Speedup</th></tr></thead>
+  <tbody>
+    <tr><td>float, 1000</td><td class="num">23.02</td><td class="num">64</td><td class="num">33.47</td><td class="num">1.45×</td></tr>
+    <tr><td>float, 1024</td><td class="num">22.69</td><td class="num">256</td><td class="num">28.46</td><td class="num">1.25×</td></tr>
+    <tr><td>float, 2000</td><td class="num">14.49</td><td class="num">96</td><td class="num">32.44</td><td class="num">2.24×</td></tr>
+    <tr><td>float, 2048</td><td class="num">15.07</td><td class="num">96</td><td class="num">23.84</td><td class="num">1.58×</td></tr>
+    <tr><td>double, 1000</td><td class="num">10.87</td><td class="num">64</td><td class="num">18.60</td><td class="num">1.71×</td></tr>
+    <tr><td>double, 1024</td><td class="num">10.10</td><td class="num">128</td><td class="num">14.12</td><td class="num">1.40×</td></tr>
+    <tr class="hl"><td>double, 2000</td><td class="num">4.49</td><td class="num">64</td><td class="num">18.06</td><td class="num">4.02×</td></tr>
+    <tr><td>double, 2048</td><td class="num">4.53</td><td class="num">64</td><td class="num">12.36</td><td class="num">2.73×</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="table-note">Best tile size versus unblocked ikj, GFLOP/s.</p>
+
+<p>The benefit grows with n. It peaks at 4.0× for double at n = 2000, where unblocked ikj collapses to 4.5 GFLOP/s once B no longer fits in L2. But the power-of-two sizes are still 27–32% slower than n = 2000, even with the best tile. Tile rows that are exactly 8 or 16 KiB apart still interfere in the cache. Blocking didn't fix the cliff.</p>
+
+<h2>V3: AVX2 Intrinsics, and Why They Didn't Help</h2>
+
+<p>The obvious next step is to stop trusting the compiler and write the SIMD by hand. V3 takes the BS = 64 blocked kernel and replaces only its innermost loop with AVX2/FMA intrinsics: broadcast <code>a(i,k)</code> into all 8 lanes, then load, FMA and store a vector of C:</p>
+
+<pre><code>const __m256 va = _mm256_set1_ps(aik);      // aik in all 8 lanes
+for (; j + 8 &lt;= j_end; j += 8) {
+  __m256 vc = _mm256_loadu_ps(crow + j);
+  const __m256 vb = _mm256_loadu_ps(brow + j);
+  vc = _mm256_fmadd_ps(va, vb, vc);         // vc = va * vb + vc
+  _mm256_storeu_ps(crow + j, vc);
+}</code></pre>
+
+<p>Against the portable build, which is limited to 128-bit SSE2 without FMA, this is 1.5–2.0× faster, as predicted. But against the native build, GCC's own AVX2 code was equal or faster in nine of ten configurations: the V3/V2 ratio was 0.81–0.94 for float and 0.86–1.03 for double<sup class="fn" id="r8"><a href="#f8">8</a></sup>. I had predicted a tie within 10%, so that held only partially.</p>
+
+<figure>
+  <img src="images/fig-v3-c-roundtrip.png" alt="An AVX2 FMA step where C is loaded and stored on every FMA" onerror="this.closest('figure').remove()">
+  <figcaption>Every FMA loads a vector of C from memory and stores it back. The arithmetic is vectorized, the data flow isn't.</figcaption>
+</figure>
+
+<figure>
+  <img src="images/exp04-avx2.png" alt="EXP04: compiler-generated blocked kernel versus hand-written AVX2" onerror="this.closest('figure').remove()">
+  <figcaption>EXP04. Compiler-generated blocked kernel (V2, BS = 64) versus the hand-written AVX2/FMA version (V3), portable and native builds.</figcaption>
+</figure>
+
+<p>The deeper reason is in the snippet above. Every single FMA comes with a load and a store of C. Faster instructions don't help when the bottleneck is how data moves, and both kernels move data the same way. To approach peak, C has to stay in registers and stop round-tripping through memory. That's V4.</p>
+
+<h2>V4: Packed Register-Blocked Microkernel</h2>
+
+<p>V4 follows the Goto/BLIS design. It changes two things at once. First, a small 6×16 tile of C is kept in <em>registers</em> across a long inner loop, the microkernel. Second, blocks of A and B are <em>packed</em>, i.e. copied into contiguous, zero-padded buffers laid out in exactly the order the microkernel reads them.</p>
+
+<figure>
+  <img src="images/fig-v4-packing.png" alt="Strided panel copied once into a contiguous buffer read linearly by the microkernel" onerror="this.closest('figure').remove()">
+  <figcaption>Packing copies strided panels into one contiguous buffer, once. The 4 KiB row stride never reaches the inner loop.</figcaption>
+</figure>
+
+<h3>The microkernel</h3>
+
+<p>The 6×16 float tile of C is 6 rows × 2 AVX2 registers = 12 YMM accumulators. They're zeroed once, updated for all KC = 256 steps, and only then added into C:</p>
+
+<pre><code>for (std::size_t k = 0; k &lt; kc; ++k) {
+  const auto b0 = S::load(b);       // B[k, 0:8]
+  const auto b1 = S::load(b + W);   // B[k, 8:16]
+#pragma GCC unroll 6
+  for (std::size_t r = 0; r &lt; kMR; ++r) {
+    const auto ar = S::bcast(a + r); // A[r, k] in every lane
+    acc[r][0] = S::fma(ar, b0, acc[r][0]);
+    acc[r][1] = S::fma(ar, b1, acc[r][1]);
+  }
+  a += kMR;     // next column of the A panel
+  b += 2 * W;   // next row of the B panel
+}</code></pre>
+
+<p>Each k-step issues two vector loads of B, six broadcasts of A and twelve independent FMAs. That's enough independent work to cover the FMA latency on the core's two FMA ports. C is read and written only once per KC-deep pass, instead of once per FMA as in V3.</p>
+
+<figure>
+  <img src="images/fig-v4-registers.png" alt="6 by 2 grid of YMM accumulator registers for the 6x16 microkernel" onerror="this.closest('figure').remove()">
+  <figcaption>The C tile lives in 12 YMM registers. Per k-step: 2 loads, 6 broadcasts, 12 FMAs.</figcaption>
+</figure>
+
+<h3>The five loops</h3>
+
+<p>Around the microkernel sit five loops, each sized to one level of the memory hierarchy. I derived the sizes analytically from the cache parameters instead of autotuning them. One A micro-panel plus one B micro-panel should fit in about half of L1: (6 + 16) · 256 · 4 B ≈ 22.5 KiB for float. The packed A block (MC × KC = 288 × 256) targets L2, and the packed B block (KC × NC = 256 × 4096) targets L3.</p>
+
+<pre><code>for (jc = 0; jc &lt; N; jc += NC)        // loop 5: NC = 4096
+  for (pc = 0; pc &lt; K; pc += KC) {     // loop 4: KC = 256
+    pack_b(...);                       //   packed B block -> L3
+    for (ic = 0; ic &lt; M; ic += MC) {   // loop 3: MC = 288
+      pack_a(...);                     //   packed A block -> L2
+      for (jr = 0; jr &lt; nc; jr += NR)  // loop 2: NR = 16
+        for (ir = 0; ir &lt; mc; ir += MR)// loop 1: MR = 6
+          microkernel(kc, ap, bp, cp, N);
+    }
+  }</code></pre>
+
+<figure>
+  <img src="images/fig-v4-loop-nest.png" alt="Five-loop nest grouped into L3, L2, L1 blocking and registers" onerror="this.closest('figure').remove()">
+  <figcaption>The loop nest, grouped by the level of the memory hierarchy each loop targets.</figcaption>
+</figure>
+
+<h3>Results</h3>
+
+<p>V4 is by far the biggest step of the ladder. In single precision it reaches 125 GFLOP/s at n = 1000 and 127 at n = 512, about 43% of the estimated peak, up from roughly 11% for the best V2/V3 kernels. Measured in the same run, it's 2.5–3.5× faster than the compiler-vectorized blocked kernel for float and 1.9–2.9× for double<sup class="fn" id="r9"><a href="#f9">9</a></sup>.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th class="num">n</th><th class="num">Float</th><th class="num">% peak</th><th class="num">× V2</th><th class="num">Double</th><th class="num">% peak</th><th class="num">× V2</th></tr></thead>
+  <tbody>
+    <tr><td class="num">512</td><td class="num">126.8</td><td class="num">43.1</td><td class="num">3.42</td><td class="num">52.2</td><td class="num">35.5</td><td class="num">2.94</td></tr>
+    <tr class="hl"><td class="num">1000</td><td class="num">125.0</td><td class="num">42.5</td><td class="num">2.70</td><td class="num">45.4</td><td class="num">30.9</td><td class="num">1.91</td></tr>
+    <tr><td class="num">1024</td><td class="num">124.5</td><td class="num">42.3</td><td class="num">3.49</td><td class="num">45.2</td><td class="num">30.7</td><td class="num">2.47</td></tr>
+    <tr><td class="num">2000</td><td class="num">106.3</td><td class="num">36.1</td><td class="num">2.48</td><td class="num">48.1</td><td class="num">32.6</td><td class="num">2.06</td></tr>
+    <tr><td class="num">2048</td><td class="num">98.1</td><td class="num">33.3</td><td class="num">3.23</td><td class="num">46.5</td><td class="num">31.6</td><td class="num">2.94</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="table-note">GFLOP/s. Peak: 294.4 (float) and 147.2 (double). “× V2”: ratio to the blocked BS = 64 kernel in the same run.</p>
+
+<figure>
+  <img src="images/exp05-packed.png" alt="EXP05: blocked, AVX2 and packed kernels measured in one run" onerror="this.closest('figure').remove()">
+  <figcaption>EXP05. Blocked (V2), AVX2 (V3) and packed (V4) kernels measured in one run, native build.</figcaption>
+</figure>
+
+<p>The clearest effect is on the cliff. In the same run, the blocked kernel loses 23% at n = 1024 and 29–32% at n = 2048 relative to the neighbouring non-power-of-two size. The packed kernel loses at most 7.7%, and essentially nothing at n = 1024. Packed panels are contiguous buffers, so the 4 KiB row stride of the original matrices never reaches the inner loop.</p>
+
+<figure>
+  <img src="images/exp05-pow2-penalty.png" alt="Power-of-two penalty, blocked versus packed" onerror="this.closest('figure').remove()">
+  <figcaption>Change in throughput at n = 1024 and 2048 relative to n = 1000 and 2000: blocked (V2) versus packed (V4), same run.</figcaption>
+</figure>
+
+<p>Two things I didn't predict. First, the gain at n = 512 wasn't smaller than at larger sizes. Float is actually fastest there. Second, float stays flat near 125 GFLOP/s up to n = 1024, then drops to 106 and 98 at n = 2000 and 2048. Both drops coincide with the packed B block outgrowing the 1.25 MiB L2: about 1 MiB for float at n = 1024 versus 2 MiB at n = 2000. That suggests a smaller NC, one that keeps packed B in L2, would recover the large-n loss. I haven't tested that yet<sup class="fn" id="r10"><a href="#f10">10</a></sup>.</p>
+
+<h2>What Mattered</h2>
+
+<p>Across the ladder, the steps that changed <em>data movement</em> mattered far more than the steps that changed <em>instructions</em>. Loop order, blocking and packing each changed which data gets reused and how contiguously it's read, and each one either produced a large gain or removed a cliff. Writing intrinsics without changing the data flow (V3) produced nothing over a good compiler. The same intrinsics combined with register blocking and packing (V4) produced the largest gain of all. The lesson I'm taking away: restructure the loops and the layouts first, and hand-vectorize only inside a register-blocked microkernel.</p>
+
+<p>Writing predictions down before measuring made the misses as informative as the hits: kij losing to ikj, the compiler beating my intrinsics, and a 1.4× day-to-day drift in absolute throughput that I'd never have noticed otherwise.</p>
+
+<h2>What's Next</h2>
+
+<ul>
+  <li>Parallelize V4 with OpenMP and study scaling across the P- and E-cores.</li>
+  <li>Compare against OpenBLAS, single-threaded and on all threads.</li>
+  <li>Sweep NC to test the L2 hypothesis from V4.</li>
+  <li>Re-run every kernel in a single run for a drift-free final ladder.</li>
+  <li>Repeat on native Linux with hardware counters and core pinning, to measure the cache explanations directly instead of modelling them.</li>
+</ul>
+
+<p>All code, raw measurements and the lab notebook are in the <a href="https://github.com/Pratham-2105/gemmx-cpp" target="_blank" rel="noopener">gemmx-cpp repository</a>, and the full write-up is in the <a href="paper.pdf" target="_blank" rel="noopener">paper</a>.</p>
+
+<section class="footnotes">
+  <ol>
+    <li id="f1">Before each formal run, I wrote a one-paragraph prediction in a lab notebook and committed it. The result was recorded against it afterwards. Exploratory runs were kept separate and are never cited. One run was discarded because a stale binary from older code got executed. After that, every experiment script rebuilds from scratch first. <a class="back" href="#r1">↩</a></li>
+    <li id="f2">Freivalds' check: multiply by a random vector r and compare A(Br) with Cr. That verifies a product in O(n²) instead of O(n³), with a standard floating-point error bound. A kernel that fails is never timed. Each build also runs 14 unit tests. <a class="back" href="#r2">↩</a></li>
+    <li id="f3">A Raptor Lake P-core can issue two 256-bit FMAs per cycle: 2 ports × 8 floats × 2 FLOPs × 4.6 GHz = 294.4 GFLOP/s in single precision, and 147.2 in double. The sustained clock under WSL2 couldn't be measured, so these percentages are upper-bound normalizations. <a class="back" href="#r3">↩</a></li>
+    <li id="f4">Each row is the median from the run of its own experiment (EXP02–EXP05). Identical code drifted by about 1.4× between days, so all conclusions in this post come from comparisons <em>within</em> a single run. <a class="back" href="#r4">↩</a></li>
+    <li id="f5">The CPU is a hybrid design. Under WSL2, the OS exposes a uniform view of the caches, so I sized blocks from the P-core values. Which core a run landed on could be neither controlled nor observed. <a class="back" href="#r5">↩</a></li>
+    <li id="f6">WSL2 exposes no hardware performance counters, so the cache explanations throughout this post are models consistent with the data, not direct measurements. <a class="back" href="#r6">↩</a></li>
+    <li id="f7">Vectorizing a sum reduction means reordering the floating-point additions across SIMD lanes. That changes the rounding, so GCC won't do it without explicit permission to reassociate (e.g. <code>-ffast-math</code>). <a class="back" href="#r7">↩</a></li>
+    <li id="f8">A plausible but unverified explanation for the gap is that GCC unrolls its vectorized loop, while my intrinsic loop issues one load–FMA–store per iteration. <a class="back" href="#r8">↩</a></li>
+    <li id="f9">This is below my predicted 3–5×. But the V2 baseline itself ran about 1.4× faster in this run than in EXP04, and so did the unchanged V3 kernel, so the drift was machine state, not code. Against the EXP04 baseline the ratio would be about 3.9×. Also, V4 allocates its packing buffers on every call, inside the timed region, which slightly understates its throughput. <a class="back" href="#r9">↩</a></li>
+    <li id="f10">For double, the same transition happens earlier: about 1 MiB at n = 512 versus 2 MiB at n = 1000, and double is already flat at 45–48 GFLOP/s from n = 1000. <a class="back" href="#r10">↩</a></li>
+  </ol>
+</section>
+
+<hr>
+
+<h3>References</h3>
+<ol class="refs">
+  <li>K. Goto and R. A. van de Geijn, “Anatomy of high-performance matrix multiplication,” <em>ACM TOMS</em>, 2008.</li>
+  <li>F. G. Van Zee and R. A. van de Geijn, “BLIS: A framework for rapidly instantiating BLAS functionality,” <em>ACM TOMS</em>, 2015.</li>
+  <li>T. M. Low et al., “Analytical modeling is enough for high-performance BLIS,” <em>ACM TOMS</em>, 2016.</li>
+  <li>M. S. Lam, E. E. Rothberg and M. E. Wolf, “The cache performance and optimizations of blocked algorithms,” <em>ASPLOS-IV</em>, 1991.</li>
+  <li>S. Williams, A. Waterman and D. Patterson, “Roofline: An insightful visual performance model for multicore architectures,” <em>CACM</em>, 2009.</li>
+  <li>T. Hoefler and R. Belli, “Scientific benchmarking of parallel computing systems,” <em>SC15</em>, 2015.</li>
+  <li>S. Boehm, <a href="https://siboehm.com/articles/22/CUDA-MMM" target="_blank" rel="noopener">“How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance: a Worklog,”</a> 2022, the format this post borrows.</li>
+</ol>
+
+</article>
+
+<script>
+  // Hide the LinkedIn badge until a real profile URL is filled in above.
+  var li = document.getElementById('linkedin');
+  if (li && li.href.indexOf('YOUR-HANDLE') !== -1) li.style.display = 'none';
+</script>
+</body>
+</html>
